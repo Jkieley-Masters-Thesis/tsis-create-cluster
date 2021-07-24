@@ -1,0 +1,67 @@
+version: 2.1
+orbs:
+  slack: circleci/slack@4.4.2
+parameters:
+  operation:
+    type: string
+    default: "create"
+
+jobs:
+  create-cluster:
+    docker:
+      - image: jkieley/cluster-creation:latest
+        auth:
+          username: $DOCKER_USER
+          password: $DOCKER_PASS
+    working_directory: /app/
+
+    steps:
+      # command will execute in trusty container
+      # and can access mongo on localhost
+      - run:
+          environment:
+            AWS_REGION: us-west-2
+            AWS_ZONE: us-west-2a
+            CLUSTER_NODE_INSTANCE_TYPE: c5.4xlarge
+            DOCKER_SERVER: $DOCKER_SERVER
+            DOCKER_USERNAME: $DOCKER_USER
+            DOCKER_PASS: $DOCKER_PASS
+            DOCKER_EMAIL: $DOCKER_EMAIL
+            NAME: myfirstcluster.k8s.local
+            KOPS_STATE_STORE: s3://attempt1-example-com-state-store
+            OPERATION: << pipeline.parameters.operation >>
+            AWS_PAGER: ""#
+          name: start docker
+          command: |
+            echo "NAME: $NAME"
+            echo "KOPS_STATE_STORE: $KOPS_STATE_STORE"
+            echo "OPERATION: $OPERATION"
+
+            aws configure set default.region us-west-2
+            aws configure set aws_access_key_id $AWS_KEY
+            aws configure set aws_secret_access_key $AWS_ACCESS_KEY
+
+            bash ./entrypoint.sh
+
+
+  complete-build:
+    docker:
+      - image: 'cimg/base:stable'
+    steps:
+      - slack/notify:
+          event: fail
+          template: basic_fail_1
+      - slack/notify:
+          event: pass
+          template: basic_success_1
+workflows:
+  deployer:
+    jobs:
+      - create-cluster:
+          context:
+            - docker-secrets
+            - aws-secrets
+      - complete-build:
+          context: slack-secrets
+          requires:
+            - create-cluster
